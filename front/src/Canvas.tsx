@@ -1,5 +1,7 @@
-import { ReactSketchCanvas, ReactSketchCanvasRef } from 'react-sketch-canvas';
-import { useRef, useEffect, useState } from 'react';
+import { Tldraw } from '@tldraw/tldraw';
+// @ts-ignore - CSS import type declarations are not available in this environment
+import '@tldraw/tldraw/tldraw.css';
+import { useEffect, useRef, useCallback } from 'react';
 
 interface Props {
   roomCode: string;
@@ -7,36 +9,44 @@ interface Props {
 }
 
 export default function Canvas({ roomCode, ws }: Props) {
-  const canvasRef = useRef<ReactSketchCanvasRef>(null);
-  const [connected, setConnected] = useState(false);
+  const editorRef = useRef<any>(null);
+  const lastSentRef = useRef<string>('');
+
+  const handleMount = useCallback((editor: any) => {
+    editorRef.current = editor;
+  }, []);
 
   useEffect(() => {
     if (!ws) return;
-    ws.onopen = () => setConnected(true);
+
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
-      if (data.type === 'draw') {
-        canvasRef.current?.loadPaths(data.paths);
+      if (data.type === 'draw' && editorRef.current) {
+        editorRef.current.loadSnapshot(data.snapshot);
       }
     };
   }, [ws]);
 
-  const handleStroke = async () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const paths = await canvasRef.current?.exportPaths();
-    ws.send(JSON.stringify({ type: 'draw', paths, roomCode }));
-  };
+  useEffect(() => {
+    if (!ws || !editorRef.current) return;
+
+    const unsubscribe = editorRef.current.store.listen((entry: any) => {
+      if (entry.changes?.added?.size > 0 || entry.changes?.updated?.size > 0) {
+        const snapshot = editorRef.current.getSnapshot();
+        const serialized = JSON.stringify(snapshot);
+        if (serialized !== lastSentRef.current) {
+          lastSentRef.current = serialized;
+          ws.send(JSON.stringify({ type: 'draw', snapshot, roomCode }));
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [ws, roomCode]);
 
   return (
-    <div>
-      <h2>Room: {roomCode} {connected ? '🟢' : '🔴'}</h2>
-      <ReactSketchCanvas
-        ref={canvasRef}
-        style={{ border: '1px solid black', width: '100%', height: '500px' }}
-        strokeWidth={4}
-        strokeColor="black"
-        onStroke={handleStroke}
-      />
+    <div style={{ width: '100%', height: '100%' }}>
+      <Tldraw onMount={handleMount} persistenceKey={roomCode} />
     </div>
   );
 }
