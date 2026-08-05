@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Canvas from './Canvas';  
 
 function App() {
   const [roomCode, setRoomCode] = useState('');
   const [currentRoom, setCurrentRoom] = useState('');
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const connectWs = (code: string) => {
+    wsRef.current = new WebSocket(`ws://localhost:3000?roomCode=${code}`);
+  };
 
   const createRoom = async () => {
     const res = await fetch('http://localhost:3000/api/rooms', { method: 'POST' });
     const data = await res.json();
     setCurrentRoom(data.roomCode);
+    connectWs(data.roomCode);
   };
 
   const joinRoom = async () => {
@@ -16,12 +23,16 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomCode }),
     });
-    if (res.ok) setCurrentRoom(roomCode);
-    else alert('Room not found');
+    if (res.ok) {
+      setCurrentRoom(roomCode);
+      connectWs(roomCode);
+    } else {
+      alert('Room not found');
+    }
   };
 
   if (currentRoom) {
-    return <h1>In room: {currentRoom}</h1>;
+    return <Canvas roomCode={currentRoom} ws={wsRef.current} />;
   }
 
   return (
